@@ -1,0 +1,51 @@
+
+==================================================================== POLITIC ANDREI-BOGDAN, GRUPA 325CD ====================================================================
+================================================================ DESCRIEREA MODULUI DE IMPLEMENTARE A TEMEI ================================================================
+
+(!) Am folosit functii in cod. Descrierea comportamentului acestora este descris in comentariile din dreptul acestora, in fisierele *.c
+
+ 		=====> In continuare voi descrie rationamentul folosit la baza implementarii, si cateva detalii de implementare a codului necesar:
+
+ 	===== BIBLIOTECA lib.h
+
+	Aici am definit majoritatea structurilor si constantelor necesare. Structura sendInitData este formata din campurile ce se afla in componenta campului DATA, din primul pachet (pachetul de tip Send-Init). Structura miniKermit este formata din campurile specifice unui pachet de date (SOH, LEN, SEQ, TYPE, DATA, CHECK, MARK). Constantele folosite: CONST_TIME - timpul maxim de asteptare in cazul unui pachet obisnuit (orice pachet, in afara  de Send-Init), CONST_MAXL - capacitatea maxima de date transmise intr-un singur pachet. CONST_TIME are valoarea 5 (secunde), CONST_MAXL are valoarea 250 (bytes).
+
+	===== FISIERUL ksender.c
+
+	Aici am implementat programul pentru sender. Intai se stabileste parcurgerea fiserelor in ordinea specificata in script si constructia numelor fisierelor de output (recv_[nume_fisier_input]), pe care le deschid. Apoi se atribuie valorile pe campurile cu valori constante (SOH si MARK).
+	
+	Se deschide un while in care se fac atat atribuirile pentru celelalte campuri din pachete, gestionarile de tipuri de pachete, cat si transferul efectiv de date. Am decis notarea diferita (firstPkg) a primului miniKermit, fata de a celorlalte (pkg), pentru o clara diferentiere, avand in vedere ca primul pachet nu apare decat la inceputul transferului. Variabila ce retine numarul secventelor este globala, ea incrementandu-se la fiecare primire de pachet 'Y' sau 'N', conform protocolului. Atribuirea secventei in campul SEQ se face intotdeauna dupa aceasta variabila.
+	Structura "stats" (cu campurile curr si prev) este folosita pentru a face diferenta intre diverse campuri. Exista variabilele "first" si "header" de tip stats. Variabila first este folosita pentru pachetul de tip 'S', iar header pentru pachetul de tip 'H'. first.prev == 1 inseamna ca a am lucrat cu tipul 'S' imediat anterior, si in prezent lucrez (implicit) cu campul 'H', care este urmatorul dupa 'S'. La fel, header.prev == 1 inseamna ca imediat anterior am lucrat cu tipul 'H'. Campul curr este 1 cand in acel moment lucrez cu acel camp. Astfel, daca first.curr == 1, inseamna ca lucrez cu pachetul 'S'; daca first.prev == 1, inseamna ca ma aflu la primul camp 'H'. Daca header.prev == 1, inseamna ca tocmai ce am trecut de 'H', si implicit ma aflu la DATA (pachetul de tip 'D').
+	O alta conditie pentru care ne aflam inca la campul 'D' este ca inca nu s-a terminat de citit din fisierul in curs (functia stoppedReading returneaza 0).Daca returneaza 1, inseamna ca citirea s-a terminat, si se ajunge la urmatorul camp (de tip 'Z'). Numai in caz ca ne aflam la ultimul fisier de citit, urmeaza campul 'B', altfel urmeaza campul 'H' din urmatorul fisier.
+	Dupa aceasta gestiune de tipuri de pachete, am implementat algoritmul transferului. Mai intai am copiat primul pachet firstPkg in variabila pkg (de tip miniKermit), pentru a lucra cu o singura variabila miniKermit. Pentru lucrul cu functia send_message, copiez tot pachetul pkg in payload-ul variabilei t (de tip msg), adaptand lungimea (t.len). Pentru lucrul cu functia receive_message_timeout, copiez tot payload-ul variabilei confY (de tip msg*) in pachetul confP (conf ~= confirmation).
+Pentru calcularea CRC-ului, folosesc vectorul "buffer" de tip char, ce retine tot pachetul, mai putin ultimele doua campuri, cele pe care nu se aplica CRC-ul.
+	Algoritmul sub forma de pseudocod este:
+
+	-> initializez confY cu NULL, pentru a se indeplini conditia de intrare in while.
+	-> while ((confY este NULL sau de tip 'L' (lost - pachet pierdut)) sau (pachetul primit de la receiver (confP) este un alt pachet intarziat care nu corespunde secventei actuale) sau (pachetul precedent a primit NAK)) - se executa urmatoarele instructiuni:
+		-> daca pachetul nu este NULL (s-a primit un pachet), daca in plus este pachetul asteptat, numarul maxim acceptat de pierderi se initializeaza la 0, deoarece nu este vorba de pachetul curent, dar altfel daca secventa este buna, se re-calculeaza crc-ul pachetului care urmeaza sa fie (re)trimis (motivul recalcularii este ca, daca pachetul a fost corupt in transfer si s-a reluat transmisia lui actualizand secventa, campul SEQ din pachet s-a modificat (SEQ = (SEQ + 2) % 64) iar CRC-ul evident ca nu mai corespundea, fiind nevoie sa modific campul CHECK cu noul CRC potrivit).
+		-> se trimite catre receiver noul mesaj (actualizat, daca a fost nevoie).
+		-> se asteapta confirmarea.
+		-> daca pachetul a fost pierdut sau in timeout, numarul de re-transmiteri se incrementeaza. Cat timp acesta este mai mic sau egal cu numarul maxim permis de re-transmiteri, pachetul se re-transmite (se apeleaza functia "continue" care re-trimite la inceputul while-ului (prima conditie din while se potriveste, asa ca se reia executia buclelor in while). Altfel, daca s-a depasit numarul permis de re-transmiteri, executia programului se incheie (se inchid si fisierele de input/output). Altfel, se verifica apoi validitatea secventei. Daca nu este valida, se while-ul incepe o noua bucla. Astfel, nu se trece mai departe la urmatorii pasi din while, daca sender-ul nu primeste un pachet cu secventa valida, corupt sau necorupt.
+		-> daca pachetul primit de receiver este de tip 'N' (NAK), se scrie in log-ul aferent fisierului mesajul NAK[[SEQ]], unde [SEQ] este numarul secventei.
+		-> daca pachetul primit este de tip 'Y' (ACK), se scrie in log-ul aferent fisierului mesajul ACK[[SEQ]], unde [SEQ] este numarul secventei.
+
+	Dupa iesirea din while, e inchid fisierele de input si de output.
+
+	===== FISIERUL kreceiver.c
+
+	In receiver, se foloseste variabila pkg pentru pachetul primit de la sender. Pentru ca urmeaza un while, campului TYPE din pkg i se atribuie caracterul ' ', pentru a respecta conditia de intrare in while. De asemenea, mai folosesc variabila globala seqNo care retine la fiecare pas numarul secventei, variabila isSendInit folosita in deciziile daca pachetul primit ar trebui sa (nu) fie de tip 'S' (folosesc aceasta variabila pentru ca primul mesaj ar putea fi corupt, si de aceea nu ne putem baza din prima pe campul TYPE al sau, care poate fi altceva decat 'S', cum ar fi normal), variabila wrongCRC, care ia valoarea potrivita in urma verificarii corectitudinii CRC-ului.
+	Imediat dupa intrarea in while-ul mare, se verifica la inceputul fiecarei bucle daca s-a ajuns sau nu la un fisier necorupt, de tip 'H', al carui camp data furnizeaza informatia despre numele fisierului de intrare, necesar pentru contructia fisierului de iesire (acelasi nume, prefixat cu "recv_"). While-ul mai "mic" este folosit pentru primirea si transmiterea confirmarii unui singur pachet per bucla (conditia de reluare a while-ului este sa nu se fi ajuns la finalul transmisiei tuturor fisierelor, conditie verificata de functia notEOT). Variabila isAck retine daca receiver-ul a confirmat sau nu pachetul primit. O data confirmat, se iese din while-ul mic. Pachetul primit de sender se afla in variabila y. Daca nu a fost primit niciun pachet in timp, inseamna ca pachetul a fost pierdut, si y va fi NULL.
+	Algoritmul de primire si transmitere a confirmarii in pseudocod:
+
+	-> cat timp y este NULL, variabila ce retine numarul de re-transmiteri se incrementeaza. Daca a ajuns la numarul maxim de incrementari, se incheie executia receiver-ului (daca se incheie executia receiver-ului, sender-ul nu va mai primi niciun pachet, si automat se va inchide si el, dupa algoritm - primeste de la receiver pachetul de tip 'L' - lost). Daca nu a ajuns la numarul maxim de incrementari, se lucreaza direct cu functia receive_message_timeout (nu se mai lucreaza cu receive_conf), deoarece se stie ca nu mai poate fi vorba de un pachet de tip 'S' (daca pachetul de tip 'S' esueaza, executia programului automat se incheie).
+	-> daca nu s-a iesit din program, inseamna ca receiver-ul a primit pachetul bun (in payload-ul lui y). PAyload-ul se copiaza peste campurile pachetului pkg.
+	-> pentru claritatea urmatoarelor conditii, trebuie stiut daca pachetul primit este sau nu corupt. Se aplica din nou functia de calcul a CRC-ului pe pachetul y, iar daca coincide cu pkg.CHECK, inseamna ca mesajul este corect transmis. In acest caz:
+			-> daca secventa nu este buna, inseamna ca pachetul primit nu este cel asteptat, si se reia executia while-ului "mic"
+			-> altfel, pachetul este bun, si se transmite ACK-ul receiver-ului, iar secventa se incrementeaza cu 2, apoi modulo 64. In mod evident, variabila wrongCRC va lua valoarea 0 (false).
+		altfel: -> inseamna ca pachetul este corupt, caz in care se transmite NAK-ul receiver-ului, iar secventa se incrementeaza cu 2, apoi modulo 64. In mod evident, variabila wrongCRC va lua valoarea 1 (true). 
+
+	===== FISIERELE de output
+
+	Fisierele de output ale sender-ului sunt cele de tip log_, in care sunt afisate NAK-urile si ACK-urile cu secventele aferente.
+	Fisierele de output ale receiver-ului sunt cele de tip recv_, in care sunt afisate continutul pachetelor de tip DATA, concatenate la nivel de fisier. Practic, se reconstruieste fisierul original, trimis de sender. Daca nu difera (fisierul de input cu acel de output corespunzator), inseamna ca datele au fost transmise corect.
