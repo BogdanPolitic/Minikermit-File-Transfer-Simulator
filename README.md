@@ -8,6 +8,8 @@ The program structure is the following:
 ----> the sender (ksender)
   
 ----> the receiver (kreceiver)
+
+
   
 --> the ksender's tasks are:
 
@@ -20,6 +22,8 @@ The program structure is the following:
 ----> else, in case of a NAK signal, or in case of timeout (which is actually set at 5 seconds), it transmits the same package as before
     
 ----> there is a code sequence for each package. Transmitting the next package always increments the sequence with 1 unit.
+
+
     
 --> the kreceiver's tasks are:
 
