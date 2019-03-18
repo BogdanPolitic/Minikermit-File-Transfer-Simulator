@@ -37,10 +37,16 @@ The program structure is the following:
 
 Running the program:
 Step 1. Go to ./'link emulator' directory and run the command 'make'
+
 Step 2. Go back to the .c sources location, and run the command 'make'
+
 Step 3. Run the command './kreceiver &'
+
   Thus, the kreceiver entity is waiting for the files to be sent. It is important that the kreceiver is already active when the ksender starts the sending process.
+  
 Step 4.Run the command './ksender [file1] [file2] ... [fileN]' where the [fileX] represents the name of the X-th file transmitted to the kreceiver.
 
+
 Verifying the output:
+
 If the input files are $file1 $file2 ... $fileN , then the corresponding output files are recv_$file1 recv_$file2 ... recv_$fileN
